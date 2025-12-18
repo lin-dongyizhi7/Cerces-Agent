@@ -62,8 +62,15 @@ bool collectNpuMetrics(int device_id, int chip_id, NpuMetrics &m) {
     //   npu-smi info -i <id> -c <chip> -s m   -> memory usage
     //   npu-smi info -i <id> -c <chip> -s b   -> memory bandwidth usage
 
-    std::string base = "npu-smi info -i " + std::to_string(device_id) +
-                       " -c " + std::to_string(chip_id) + " -s ";
+    std::string base = "npu-smi info watch";
+    if (device_id != 0) {
+        base += " -i " + std::to_string(device_id);
+    }
+    if (chip_id != 0) {
+        base += " -c " + std::to_string(chip_id);
+    }
+
+    base += " -s ";
 
     std::string out_p = runCommand(base + "p");
     std::string out_t = runCommand(base + "t");
