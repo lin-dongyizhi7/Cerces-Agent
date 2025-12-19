@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package monitor;
+
+// 单条监控数据
+message MonitorData {
+    string node_id = 1;           // 节点ID
+    int64 timestamp = 2;          // 时间戳（微秒）
+    string metric_name = 3;       // 指标名称
+    double value = 4;             // 指标值
+    string unit = 5;              // 单位
+    map<string, string> tags = 6; // 标签（rank_id, step_id等）
+}
+
+// 批量监控数据
+message BatchMonitorData {
+    repeated MonitorData data = 1;
+}
+
