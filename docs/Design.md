@@ -263,19 +263,63 @@ communication_layer:
 
 ```
 异常检测层
-├── DataReceiver          # 数据接收模块
-├── DetectionEngine       # 检测引擎
-│   ├── StatisticalDetector    # 统计学检测器
-│   ├── ComparisonDetector     # 对比分析检测器
-│   └── MLDetector             # 机器学习检测器
-├── RuleEngine            # 规则引擎（实现R1-R10规则）
-├── AlertManager          # 预警管理
-└── ConfigManager         # 配置管理
+├── AnomalyDetectionController  # 主控制器（协调整个检测流程）
+├── DataReceiver                # 数据接收模块
+├── DetectionEngine             # 检测引擎
+│   ├── StatisticalDetector     # 统计学检测器（实现R1、R2等规则）
+│   ├── ComparisonDetector      # 对比分析检测器（实现R3-R6等规则）
+│   └── MLDetector              # 机器学习检测器
+├── RuleOrchestrator            # 规则编排器（管理规则与检测器的映射）
+├── AlertManager                # 预警管理
+└── ConfigManager               # 配置管理
 ```
 
 ### 3.2 核心类设计
 
-#### 3.2.1 DetectionEngine
+#### 3.2.1 AnomalyDetectionController（主控制器）
+**职责**：异常检测层的主控制器，协调数据接收、检测执行和预警管理
+
+**主要接口**：
+```python
+class AnomalyDetectionController:
+    def __init__(self, config: Dict):
+        """初始化主控制器，加载所有组件"""
+        self.data_receiver = DataReceiver(config['data_receiver'])
+        self.detection_engine = DetectionEngine(config['detection_engine'])
+        self.rule_orchestrator = RuleOrchestrator(config['rule_orchestrator'])
+        self.alert_manager = AlertManager(config['alert_manager'])
+        self._setup_data_flow()
+    
+    def _setup_data_flow(self):
+        """设置数据流：接收 -> 检测 -> 预警"""
+        self.data_receiver.register_callback(self._on_data_received)
+    
+    def _on_data_received(self, data: StructuredData):
+        """数据接收回调：执行检测流程"""
+        # 1. 通过规则编排器选择合适的检测器
+        applicable_detectors = self.rule_orchestrator.get_applicable_detectors(data)
+        
+        # 2. 执行检测
+        anomaly_results = []
+        for detector in applicable_detectors:
+            result = self.detection_engine.detect_with_detector(detector, data)
+            if result:
+                anomaly_results.append(result)
+        
+        # 3. 处理异常结果
+        for anomaly in anomaly_results:
+            self.alert_manager.process_anomaly(anomaly)
+    
+    def start(self):
+        """启动异常检测层"""
+        self.data_receiver.start()
+    
+    def stop(self):
+        """停止异常检测层"""
+        self.data_receiver.stop()
+```
+
+#### 3.2.2 DetectionEngine
 **职责**：异常检测引擎，管理多种检测方法
 
 **主要接口**：
@@ -283,20 +327,37 @@ communication_layer:
 class DetectionEngine:
     def __init__(self, config: Dict):
         """初始化检测引擎，加载配置的检测方法"""
-        pass
+        self.detectors = {}
+        self._initialize_detectors(config)
     
-    def detect(self, data: StructuredData) -> List[AnomalyResult]:
-        """执行异常检测，返回检测结果列表"""
-        pass
+    def _initialize_detectors(self, config: Dict):
+        """初始化所有检测器"""
+        if config.get('statistical', {}).get('enabled', True):
+            self.detectors['statistical'] = StatisticalDetector(config['statistical'])
+        if config.get('comparison', {}).get('enabled', True):
+            self.detectors['comparison'] = ComparisonDetector(config['comparison'])
+        if config.get('ml', {}).get('enabled', True):
+            self.detectors['ml'] = MLDetector(config['ml'])
     
-    def register_detector(self, detector: BaseDetector):
+    def detect_with_detector(self, detector_name: str, 
+                            data: StructuredData) -> Optional[AnomalyResult]:
+        """使用指定检测器执行检测"""
+        if detector_name not in self.detectors:
+            return None
+        return self.detectors[detector_name].detect(data)
+    
+    def detect_all(self, data: StructuredData) -> Dict[str, AnomalyResult]:
+        """使用所有检测器执行检测"""
+        results = {}
+        for name, detector in self.detectors.items():
+            result = detector.detect(data)
+            if result:
+                results[name] = result
+        return results
+    
+    def register_detector(self, name: str, detector: BaseDetector):
         """注册检测器"""
-        pass
-    
-    def get_detection_results(self, 
-                             data: StructuredData) -> Dict[str, AnomalyResult]:
-        """获取所有检测方法的结果"""
-        pass
+        self.detectors[name] = detector
 ```
 
 #### 3.2.2 BaseDetector（抽象基类）
@@ -322,10 +383,12 @@ class BaseDetector(ABC):
 ```
 
 #### 3.2.3 StatisticalDetector（统计学检测器）
+**职责**：实现基于统计学的异常检测方法，包括R1、R2等规则
+
 **实现方法**：
 - 3σ规则检测
-- 静态阈值检测（R1）
-- CUSUM趋势检测（R2）
+- 静态阈值检测（R1）：实现重要指标项的静态阈值越界检测
+- CUSUM趋势检测（R2）：实现缓变指标的持续性偏移趋势检测
 - 滑动窗口对比检测
 
 **类设计**：
@@ -334,40 +397,137 @@ class StatisticalDetector(BaseDetector):
     def __init__(self, config: Dict):
         self.window_size = config.get('window_size', 100)
         self.sigma_threshold = config.get('sigma_threshold', 3.0)
-        self.static_thresholds = config.get('static_thresholds', {})
-        self.cusum_config = config.get('cusum', {})
+        # R1规则配置：静态阈值
+        self.r1_config = config.get('R1', {})
+        self.static_thresholds = self.r1_config.get('thresholds', {})
+        # R2规则配置：CUSUM
+        self.r2_config = config.get('R2', {})
+        self.cusum_config = self.r2_config.get('cusum', {})
         self.sliding_windows = {}  # metric_name -> SlidingWindow
+        self.cusum_states = {}  # metric_name -> CUSUMState
     
     def detect(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """执行统计学检测"""
+        """执行统计学检测，包括R1、R2规则"""
+        metric_name = data.metric_name
+        metric_type = data.metric_type
+        
         # 1. 更新滑动窗口
-        # 2. 执行3σ检测
-        # 3. 执行静态阈值检测
-        # 4. 执行CUSUM检测
-        # 5. 返回异常结果
+        self._update_sliding_window(metric_name, data.value, data.timestamp_us)
+        
+        # 2. 执行R1规则：静态阈值检测（适用于T1-T7等指标）
+        if metric_type in ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']:
+            r1_result = self._check_r1_static_threshold(data)
+            if r1_result:
+                return r1_result
+        
+        # 3. 执行R2规则：CUSUM趋势检测
+        if metric_type in ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']:
+            r2_result = self._check_r2_cusum(data)
+            if r2_result:
+                return r2_result
+        
+        # 4. 执行3σ检测（通用统计方法）
+        sigma_result = self._check_3sigma(data)
+        if sigma_result:
+            return sigma_result
+        
+        return None
+    
+    def _check_r1_static_threshold(self, data: StructuredData) -> Optional[AnomalyResult]:
+        """R1规则：静态阈值检测"""
+        if data.metric_name not in self.static_thresholds:
+            return None
+        threshold = self.static_thresholds[data.metric_name]
+        # 检查连续越界逻辑
+        # ...
+        pass
+    
+    def _check_r2_cusum(self, data: StructuredData) -> Optional[AnomalyResult]:
+        """R2规则：CUSUM趋势检测"""
+        # CUSUM算法实现
+        # ...
         pass
 ```
 
 #### 3.2.4 ComparisonDetector（对比分析检测器）
+**职责**：实现基于对比分析的异常检测方法，包括R3-R6等规则
+
 **实现方法**：
-- Rank对比检测
+- R3规则：训练吞吐量对比检测
+- R4规则：计算密集型核函数FLOPS对比检测
+- R5规则：Rank通信带宽对比检测
+- R6规则：DP组通信带宽对比检测
 - 历史迭代对比检测
-- DP组内/跨组对比检测
 
 **类设计**：
 ```python
 class ComparisonDetector(BaseDetector):
     def __init__(self, config: Dict):
-        self.rank_comparison_enabled = config.get('rank_comparison', True)
-        self.history_comparison_enabled = config.get('history_comparison', True)
-        self.dp_group_comparison_enabled = config.get('dp_group_comparison', True)
+        # R3规则配置：吞吐量对比
+        self.r3_config = config.get('R3', {})
+        # R4规则配置：FLOPS对比
+        self.r4_config = config.get('R4', {})
+        self.flops_baselines = self.r4_config.get('baselines', {})
+        # R5规则配置：Rank通信对比
+        self.r5_config = config.get('R5', {})
+        # R6规则配置：DP组通信对比
+        self.r6_config = config.get('R6', {})
         self.history_data = {}  # step_id -> metrics
+        self.rank_data_cache = {}  # timestamp -> {rank_id: value}
+        self.dp_group_cache = {}  # dp_group_id -> {rank_id: value}
     
     def detect(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """执行对比分析检测"""
-        # 1. Rank对比
-        # 2. 历史迭代对比
-        # 3. DP组对比
+        """执行对比分析检测，包括R3-R6规则"""
+        metric_type = data.metric_type
+        
+        # R3规则：训练吞吐量对比（D1指标）
+        if metric_type == 'D1':
+            r3_result = self._check_r3_throughput_comparison(data)
+            if r3_result:
+                return r3_result
+        
+        # R4规则：FLOPS对比（F1-F4指标）
+        if metric_type in ['F1', 'F2', 'F3', 'F4']:
+            r4_result = self._check_r4_flops_comparison(data)
+            if r4_result:
+                return r4_result
+        
+        # R5规则：Rank通信对比（G1-G4指标）
+        if metric_type in ['G1', 'G2', 'G3', 'G4']:
+            r5_result = self._check_r5_rank_communication(data)
+            if r5_result:
+                return r5_result
+        
+        # R6规则：DP组通信对比（G1-G4指标）
+        if metric_type in ['G1', 'G2', 'G3', 'G4']:
+            r6_result = self._check_r6_dp_group_communication(data)
+            if r6_result:
+                return r6_result
+        
+        return None
+    
+    def _check_r3_throughput_comparison(self, data: StructuredData) -> Optional[AnomalyResult]:
+        """R3规则：训练吞吐量对比"""
+        # 基于滑动窗口的吞吐量对比逻辑
+        # ...
+        pass
+    
+    def _check_r4_flops_comparison(self, data: StructuredData) -> Optional[AnomalyResult]:
+        """R4规则：FLOPS对比"""
+        # 与基准FLOPS对比
+        # ...
+        pass
+    
+    def _check_r5_rank_communication(self, data: StructuredData) -> Optional[AnomalyResult]:
+        """R5规则：Rank通信对比"""
+        # 组内单rank异常检验
+        # ...
+        pass
+    
+    def _check_r6_dp_group_communication(self, data: StructuredData) -> Optional[AnomalyResult]:
+        """R6规则：DP组通信对比"""
+        # 跨DP组异常检验
+        # ...
         pass
 ```
 
@@ -395,38 +555,111 @@ class MLDetector(BaseDetector):
         return None
 ```
 
-#### 3.2.6 RuleEngine（规则引擎）
-**职责**：实现R1-R10检测规则
+#### 3.2.6 RuleOrchestrator（规则编排器）
+**职责**：管理规则与检测器的映射关系，根据数据特征选择合适的检测器
+
+**设计理念**：
+- R1-R10规则已经融入到对应的检测器中（R1、R2在StatisticalDetector，R3-R6在ComparisonDetector等）
+- 规则编排器负责根据指标类型、规则配置等，决定调用哪些检测器
+- 避免重复检测，提高效率
 
 **类设计**：
 ```python
-class RuleEngine:
+class RuleOrchestrator:
     def __init__(self, config: Dict):
-        self.rules = {
-            'R1': StaticThresholdRule(config['R1']),
-            'R2': CUSUMRule(config['R2']),
-            'R3': ThroughputComparisonRule(config['R3']),
-            'R4': FLOPSComparisonRule(config['R4']),
-            'R5': RankCommunicationRule(config['R5']),
-            'R6': DPGroupCommunicationRule(config['R6']),
-            'R7': MinorKernelRule(config['R7']),
-            'R8': KernelLaunchDelayRule(config['R8']),
-            'R9': MemoryCopyRateRule(config['R9']),
-            'R10': InterStepCPURule(config['R10']),
+        """初始化规则编排器，建立规则与检测器的映射"""
+        self.rule_to_detector_map = {
+            # R1、R2规则由StatisticalDetector实现
+            'R1': 'statistical',
+            'R2': 'statistical',
+            # R3-R6规则由ComparisonDetector实现
+            'R3': 'comparison',
+            'R4': 'comparison',
+            'R5': 'comparison',
+            'R6': 'comparison',
+            # R7-R10规则需要专门的检测器（可在StatisticalDetector或新增检测器中实现）
+            'R7': 'statistical',  # 次要NPU内核空窗占比
+            'R8': 'statistical',  # 核启动延迟分布
+            'R9': 'statistical',  # 内存拷贝速率
+            'R10': 'statistical',  # 步间CPU操作耗时
+        }
+        self.enabled_rules = config.get('enabled_rules', [])
+        self.metric_type_to_rules = self._build_metric_rule_mapping()
+    
+    def _build_metric_rule_mapping(self) -> Dict[str, List[str]]:
+        """构建指标类型到规则的映射"""
+        return {
+            'T1': ['R1', 'R2'],  # 功率
+            'T2': ['R1', 'R2'],  # 温度
+            'T3': ['R1', 'R2'],  # AI Core占用率
+            'T4': ['R1', 'R2'],  # AI Cpu占用率
+            'T5': ['R1', 'R2'],  # Ctrl Cpu占用率
+            'T6': ['R1', 'R2'],  # 内存占用率
+            'T7': ['R1', 'R2'],  # 内存带宽占用率
+            'D1': ['R3'],  # 训练吞吐量
+            'F1': ['R4'],  # aclnnFlashAttentionScore
+            'F2': ['R4'],  # aclnnMatmul
+            'F3': ['R4'],  # aclnnBatchMatMul
+            'F4': ['R4'],  # aclnnFFN
+            'G1': ['R5', 'R6'],  # hcclAllReduce
+            'G2': ['R5', 'R6'],  # hcclBroadcast
+            'G3': ['R5', 'R6'],  # hcclAllGather
+            'G4': ['R5', 'R6'],  # hcclReduceScatter
+            # R7-R10规则根据具体指标类型映射
         }
     
-    def execute_rules(self, data: StructuredData) -> List[AnomalyResult]:
-        """执行所有规则"""
-        results = []
-        for rule_name, rule in self.rules.items():
-            if rule.is_applicable(data):
-                result = rule.check(data)
-                if result:
-                    results.append(result)
-        return results
+    def get_applicable_detectors(self, data: StructuredData) -> List[str]:
+        """根据数据特征，返回需要执行的检测器列表"""
+        applicable_detectors = set()
+        metric_type = data.metric_type
+        
+        # 根据指标类型获取适用的规则
+        applicable_rules = self.metric_type_to_rules.get(metric_type, [])
+        
+        # 过滤启用的规则
+        enabled_applicable_rules = [r for r in applicable_rules if r in self.enabled_rules]
+        
+        # 根据规则获取对应的检测器
+        for rule in enabled_applicable_rules:
+            detector = self.rule_to_detector_map.get(rule)
+            if detector:
+                applicable_detectors.add(detector)
+        
+        return list(applicable_detectors)
+    
+    def get_rules_for_detector(self, detector_name: str) -> List[str]:
+        """获取指定检测器负责的规则列表"""
+        return [rule for rule, detector in self.rule_to_detector_map.items() 
+                if detector == detector_name]
 ```
 
-#### 3.2.7 AlertManager（预警管理）
+#### 3.2.7 DataReceiver（数据接收模块）
+**职责**：从通信转义层接收结构化数据
+
+**主要接口**：
+```python
+class DataReceiver:
+    def __init__(self, config: Dict):
+        """初始化数据接收模块"""
+        self.message_queue = MessageQueue(config['message_queue'])
+        self.callbacks = []
+    
+    def register_callback(self, callback: Callable[[StructuredData], None]):
+        """注册数据接收回调"""
+        self.callbacks.append(callback)
+    
+    def start(self):
+        """启动数据接收"""
+        # 从消息队列接收数据
+        # 调用注册的回调函数
+        pass
+    
+    def stop(self):
+        """停止数据接收"""
+        pass
+```
+
+#### 3.2.8 AlertManager（预警管理）
 **职责**：管理异常预警
 
 **类设计**：
@@ -469,24 +702,116 @@ class AlertManager:
 - 使用时序数据库（InfluxDB或TimescaleDB）存储历史数据
 - 支持快速查询和聚合
 
-### 3.4 配置设计
+### 3.4 主程序入口设计
+
+**主程序文件**：`AnomalyDetection/main.py`
+
+```python
+#!/usr/bin/env python3
+"""
+异常检测层主程序
+负责启动和协调整个异常检测流程
+"""
+
+import signal
+import sys
+from AnomalyDetectionController import AnomalyDetectionController
+from ConfigManager import ConfigManager
+
+def signal_handler(sig, frame):
+    """信号处理函数"""
+    print("\n收到停止信号，正在关闭...")
+    sys.exit(0)
+
+def main():
+    """主函数"""
+    # 注册信号处理
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # 加载配置
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "config/detection.yaml"
+    config = ConfigManager.load(config_path)
+    
+    # 创建主控制器
+    controller = AnomalyDetectionController(config)
+    
+    try:
+        # 启动异常检测层
+        print("启动异常检测层...")
+        controller.start()
+        print("异常检测层运行中，按Ctrl+C停止...")
+        
+        # 保持运行
+        while True:
+            import time
+            time.sleep(1)
+    
+    except KeyboardInterrupt:
+        print("\n正在停止...")
+    finally:
+        controller.stop()
+        print("异常检测层已停止")
+
+if __name__ == "__main__":
+    main()
+```
+
+### 3.5 配置设计
 
 ```yaml
 detection_layer:
-  detectors:
+  # 数据接收配置
+  data_receiver:
+    message_queue:
+      type: "zeromq"
+      endpoint: "tcp://localhost:5555"
+      buffer_size: 10000
+  
+  # 检测引擎配置
+  detection_engine:
     statistical:
       enabled: true
       window_size: 100
       sigma_threshold: 3.0
-      cusum:
-        delta: 0.2  # 温度
-        h: 5
+      # R1规则配置
+      R1:
+        enabled: true
+        thresholds:
+          T1: {upper: 300, lower: 0, consecutive: 3}
+          T2: {upper: 85, lower: 0, consecutive: 3}
+          T3: {upper: 100, lower: 0, consecutive: 3}
+          # ...
+      # R2规则配置
+      R2:
+        enabled: true
+        cusum:
+          delta: 0.2
+          h: 5
+        applicable_metrics: ["T1", "T2", "T3", "T4", "T5", "T6", "T7"]
     
     comparison:
       enabled: true
-      rank_comparison: true
-      history_comparison: true
-      dp_group_comparison: true
+      # R3规则配置
+      R3:
+        enabled: true
+        window_size: 100
+        threshold_ratio: 0.2
+      # R4规则配置
+      R4:
+        enabled: true
+        baselines:
+          F1: 1000.0  # aclnnFlashAttentionScore基准FLOPS
+          F2: 2000.0  # aclnnMatmul基准FLOPS
+          # ...
+      # R5规则配置
+      R5:
+        enabled: true
+        threshold_ratio: 0.3
+      # R6规则配置
+      R6:
+        enabled: true
+        threshold_ratio: 0.2
     
     ml:
       enabled: true
@@ -495,17 +820,11 @@ detection_layer:
         n_estimators: 100
         contamination: 0.1
   
-  rules:
-    R1:
-      enabled: true
-      thresholds:
-        T1: {upper: 300, lower: 0, consecutive: 3}
-        T2: {upper: 85, lower: 0, consecutive: 3}
-        # ...
-    R2:
-      enabled: true
-      # ...
+  # 规则编排器配置
+  rule_orchestrator:
+    enabled_rules: ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10"]
   
+  # 预警管理配置
   alert:
     dedup_window: 300
     levels:
