@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>昇腾NPU分布式训练监测 - 可视化</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+  <!-- 使用 CDN 引入 Chart.js 用于折线图展示 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="header">
+    <h1>昇腾NPU分布式训练监测中心 - 可视化</h1>
+    <div class="status-bar">
+      <span id="ws-status" class="status-dot status-disconnected">WS 未连接</span>
+      <span id="health-status" class="status-dot status-unknown">后端状态未知</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <nav class="tabs">
+      <button class="tab active" data-target="tab-realtime">实时监控</button>
+      <button class="tab" data-target="tab-alerts">报警仪表盘</button>
+      <button class="tab" data-target="tab-rootcause">根因分析</button>
+      <button class="tab" data-target="tab-config">检测配置</button>
+    </nav>
+
+    <section id="tab-realtime" class="tab-panel active">
+      <div class="panel-header">
+        <h2>实时监控</h2>
+        <div class="controls">
+          <label>
+            后端地址：
+            <input type="text" id="backend-url" value="http://localhost:5000" />
+          </label>
+          <button id="reconnect-ws">重连 WebSocket</button>
+        </div>
+      </div>
+
+      <div class="realtime-layout">
+        <div class="realtime-left">
+          <div class="card">
+            <h3>实时数据流</h3>
+            <div id="realtime-list" class="realtime-list"></div>
+          </div>
+        </div>
+
+        <div class="realtime-right">
+          <div class="card">
+            <h3>指标折线图（简版）</h3>
+            <div class="chart-controls">
+              <label>
+                过滤指标名称：
+                <input type="text" id="metric-filter" placeholder="例如: T1" />
+              </label>
+              <label>
+                最大点数：
+                <input type="number" id="max-points" value="200" min="10" max="5000" />
+              </label>
+            </div>
+            <canvas id="realtime-chart" height="200"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-alerts" class="tab-panel">
+      <div class="panel-header">
+        <h2>报警仪表盘（占位实现）</h2>
+      </div>
+      <div class="card">
+        <p>当前后端未暴露报警查询接口，此处先做占位。</p>
+        <p>后续可以从可视化后端或数据库中拉取报警列表并展示。</p>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>节点</th>
+              <th>Rank</th>
+              <th>指标</th>
+              <th>规则</th>
+              <th>等级</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody id="alerts-table-body">
+            <tr>
+              <td colspan="7" style="text-align:center;color:#888;">
+                暂无数据（等待后端提供 /api/alerts 等接口）
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-rootcause" class="tab-panel">
+      <div class="panel-header">
+        <h2>根因分析（占位实现）</h2>
+      </div>
+      <div class="card">
+        <div class="rootcause-form">
+          <label>
+            异常 ID：
+            <input type="text" id="rootcause-anomaly-id" placeholder="输入 anomaly_id" />
+          </label>
+          <button id="btn-rootcause-query">查询根因</button>
+        </div>
+        <pre id="rootcause-result" class="rootcause-result">
+点击“查询根因”后，将调用后端 /api/root_cause/{anomaly_id}，目前为占位返回。
+        </pre>
+      </div>
+    </section>
+
+    <section id="tab-config" class="tab-panel">
+      <div class="panel-header">
+        <h2>检测方法配置</h2>
+      </div>
+      <div class="card">
+        <p>通过调用 `/api/detection/config` 接口，动态开启/关闭不同类型的检测方法。</p>
+        <form id="detector-config-form" class="detector-config">
+          <label>
+            <input type="checkbox" id="cfg-statistical" />
+            启用 Statistical Detector（统计学检测）
+          </label>
+          <label>
+            <input type="checkbox" id="cfg-comparison" />
+            启用 Comparison Detector（对比分析）
+          </label>
+          <label>
+            <input type="checkbox" id="cfg-ml" />
+            启用 ML Detector（机器学习检测）
+          </label>
+          <div class="config-actions">
+            <button type="button" id="btn-load-config">拉取当前配置</button>
+            <button type="button" id="btn-save-config">保存配置</button>
+          </div>
+        </form>
+        <pre id="config-message" class="config-message"></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>可视化层前端示例页面，可直接用浏览器打开本地文件，或通过静态服务器部署。</span>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>
+
+
