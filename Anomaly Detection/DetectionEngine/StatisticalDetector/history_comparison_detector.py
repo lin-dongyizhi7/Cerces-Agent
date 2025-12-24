@@ -100,3 +100,4 @@ class HistoryComparisonDetector(BaseDetector):
         metric_key = f"{data.metric_name}_{data.node_id}_{data.rank_id}"
         self.history_data[metric_key][data.step_id] = data.value
 
+

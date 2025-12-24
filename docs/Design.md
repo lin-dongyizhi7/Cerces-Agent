@@ -266,8 +266,7 @@ communication_layer:
 ├── AnomalyDetectionController  # 主控制器（协调整个检测流程）
 ├── DataReceiver                # 数据接收模块
 ├── DetectionEngine             # 检测引擎
-│   ├── StatisticalDetector     # 统计学检测器（实现R1、R2等规则）
-│   ├── ComparisonDetector      # 对比分析检测器（实现R3-R6等规则）
+│   ├── StatisticalDetector     # 统一统计学检测器（实现R1-R10及对比规则）
 │   └── MLDetector              # 机器学习检测器
 ├── RuleOrchestrator            # 规则编排器（管理规则与检测器的映射）
 ├── AlertManager                # 预警管理
@@ -332,10 +331,10 @@ class DetectionEngine:
     
     def _initialize_detectors(self, config: Dict):
         """初始化所有检测器"""
-        if config.get('statistical', {}).get('enabled', True):
-            self.detectors['statistical'] = StatisticalDetector(config['statistical'])
-        if config.get('comparison', {}).get('enabled', True):
-            self.detectors['comparison'] = ComparisonDetector(config['comparison'])
+        # 统一统计学检测器（包含单指标统计与对比分析规则）
+        if config.get('statistical', {}).get('enabled', True) or config.get('comparison', {}).get('enabled', True):
+            self.detectors['statistical'] = StatisticalDetector(config)
+        # 机器学习检测器
         if config.get('ml', {}).get('enabled', True):
             self.detectors['ml'] = MLDetector(config['ml'])
     
@@ -449,117 +448,89 @@ class StatisticalDetector(BaseDetector):
         pass
 ```
 
-#### 3.2.4 ComparisonDetector（对比分析检测器）
-**职责**：实现基于对比分析的异常检测方法，包括R3-R6等规则
+#### 3.2.4 统计对比子检测器（已合并进StatisticalDetector）
+**职责**：在统一统计检测器内部，实现基于对比分析的异常检测方法（原 ComparisonDetector），包括R3-R6等规则：
 
-**实现方法**：
-- R3规则：训练吞吐量对比检测
-- R4规则：计算密集型核函数FLOPS对比检测
-- R5规则：Rank通信带宽对比检测
-- R6规则：DP组通信带宽对比检测
-- 历史迭代对比检测
+- R3规则：训练吞吐量对比检测（`ThroughputComparisonDetector`）
+- R4规则：计算密集型核函数FLOPS对比检测（`FLOPSComparisonDetector`）
+- R5规则：Rank通信带宽对比检测（`RankCommunicationDetector`）
+- R6规则：DP组通信带宽对比检测（`DPGroupCommunicationDetector`）
+- 历史迭代对比检测（`HistoryComparisonDetector`）
 
-**类设计**：
-```python
-class ComparisonDetector(BaseDetector):
-    def __init__(self, config: Dict):
-        # R3规则配置：吞吐量对比
-        self.r3_config = config.get('R3', {})
-        # R4规则配置：FLOPS对比
-        self.r4_config = config.get('R4', {})
-        self.flops_baselines = self.r4_config.get('baselines', {})
-        # R5规则配置：Rank通信对比
-        self.r5_config = config.get('R5', {})
-        # R6规则配置：DP组通信对比
-        self.r6_config = config.get('R6', {})
-        self.history_data = {}  # step_id -> metrics
-        self.rank_data_cache = {}  # timestamp -> {rank_id: value}
-        self.dp_group_cache = {}  # dp_group_id -> {rank_id: value}
-    
-    def detect(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """执行对比分析检测，包括R3-R6规则"""
-        metric_type = data.metric_type
-        
-        # R3规则：训练吞吐量对比（D1指标）
-        if metric_type == 'D1':
-            r3_result = self._check_r3_throughput_comparison(data)
-            if r3_result:
-                return r3_result
-        
-        # R4规则：FLOPS对比（F1-F4指标）
-        if metric_type in ['F1', 'F2', 'F3', 'F4']:
-            r4_result = self._check_r4_flops_comparison(data)
-            if r4_result:
-                return r4_result
-        
-        # R5规则：Rank通信对比（G1-G4指标）
-        if metric_type in ['G1', 'G2', 'G3', 'G4']:
-            r5_result = self._check_r5_rank_communication(data)
-            if r5_result:
-                return r5_result
-        
-        # R6规则：DP组通信对比（G1-G4指标）
-        if metric_type in ['G1', 'G2', 'G3', 'G4']:
-            r6_result = self._check_r6_dp_group_communication(data)
-            if r6_result:
-                return r6_result
-        
-        return None
-    
-    def _check_r3_throughput_comparison(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """R3规则：训练吞吐量对比"""
-        # 基于滑动窗口的吞吐量对比逻辑
-        # ...
-        pass
-    
-    def _check_r4_flops_comparison(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """R4规则：FLOPS对比"""
-        # 与基准FLOPS对比
-        # ...
-        pass
-    
-    def _check_r5_rank_communication(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """R5规则：Rank通信对比"""
-        # 组内单rank异常检验
-        # ...
-        pass
-    
-    def _check_r6_dp_group_communication(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """R6规则：DP组通信对比"""
-        # 跨DP组异常检验
-        # ...
-        pass
-```
+这些子检测器均以独立类形式实现，物理归属在 `StatisticalDetector` 目录下，由 `StatisticalDetector` 统一聚合和调度。
 
 #### 3.2.5 MLDetector（机器学习检测器）
 **实现方法**：
-- 孤立森林
-- LOF
-- One-Class SVM
-- 自编码器
+- **传统机器学习方法**：
+  - 孤立森林（Isolation Forest）：基于随机森林的异常检测
+  - LOF（Local Outlier Factor）：基于局部密度的异常检测
+  - One-Class SVM：基于支持向量机的单类分类异常检测
+  - 自编码器（AutoEncoder）：基于重构误差的异常检测
+- **深度学习方法**：
+  - **LSTM**：基于长短期记忆网络的时间序列预测异常检测
+    - 使用 LSTM 模型预测下一个时间点的值
+    - 通过预测误差判断异常
+    - 适合捕捉时间序列的长期依赖关系
+  - **Transformer**：基于 Transformer 架构的时间序列异常检测
+    - 使用 Transformer 编码器学习时间序列模式
+    - 通过自注意力机制捕捉长距离依赖
+    - 适合复杂的时间序列模式识别
+
+**设计特点**：
+- 所有 ML 检测方法均**按指标独立维护模型和历史数据**，避免不同指标之间的相互干扰
+- 每个指标流（metric_type|metric_name|node_id|rank_id）独立训练和推理
+- 支持多种方法并行检测，提高检测准确性
 
 **类设计**：
 ```python
 class MLDetector(BaseDetector):
     def __init__(self, config: Dict):
-        self.method = config.get('method', 'isolation_forest')
-        self.model = self._load_model()
-        self.feature_extractor = FeatureExtractor()
+        """初始化机器学习检测器，支持多种方法"""
+        self.detectors = []
+        ml_config = config.get('ml', {})
+        methods = ml_config.get('methods', ['isolation_forest'])
+        
+        # 根据配置初始化不同的检测器
+        if 'isolation_forest' in methods:
+            self.detectors.append(IsolationForestDetector(...))
+        if 'lof' in methods:
+            self.detectors.append(LOFDetector(...))
+        if 'one_class_svm' in methods:
+            self.detectors.append(OneClassSVMDetector(...))
+        if 'autoencoder' in methods:
+            self.detectors.append(AutoEncoderDetector(...))
+        if 'lstm' in methods:
+            self.detectors.append(LSTMDetector(...))
+        if 'transformer' in methods:
+            self.detectors.append(TransformerDetector(...))
     
     def detect(self, data: StructuredData) -> Optional[AnomalyResult]:
-        """执行机器学习检测"""
-        features = self.feature_extractor.extract(data)
-        anomaly_score = self.model.predict([features])[0]
-        if anomaly_score < threshold:
-            return AnomalyResult(...)
+        """使用所有启用的检测器执行检测"""
+        for detector in self.detectors:
+            if detector.is_enabled():
+                result = detector.detect(data)
+                if result:
+                    return result
         return None
 ```
+
+**LSTM 检测器特点**：
+- 使用 LSTM 网络学习时间序列的长期依赖关系
+- 通过预测下一个值并计算预测误差来检测异常
+- 支持可配置的序列长度、隐藏层维度、层数等超参数
+- 每个指标独立训练 LSTM 模型
+
+**Transformer 检测器特点**：
+- 使用 Transformer 编码器架构，通过自注意力机制捕捉长距离依赖
+- 支持位置编码，更好地理解时间序列的顺序信息
+- 适合处理复杂的时间序列模式
+- 每个指标独立训练 Transformer 模型
 
 #### 3.2.6 RuleOrchestrator（规则编排器）
 **职责**：管理规则与检测器的映射关系，根据数据特征选择合适的检测器
 
 **设计理念**：
-- R1-R10规则已经融入到对应的检测器中（R1、R2在StatisticalDetector，R3-R6在ComparisonDetector等）
+- R1-R10规则已经融入到统计学检测器中（单指标统计规则与R3-R6对比规则均在StatisticalDetector内部实现）
 - 规则编排器负责根据指标类型、规则配置等，决定调用哪些检测器
 - 避免重复检测，提高效率
 
@@ -569,18 +540,16 @@ class RuleOrchestrator:
     def __init__(self, config: Dict):
         """初始化规则编排器，建立规则与检测器的映射"""
         self.rule_to_detector_map = {
-            # R1、R2规则由StatisticalDetector实现
+            # R1-R10规则统一由StatisticalDetector实现
             'R1': 'statistical',
             'R2': 'statistical',
-            # R3-R6规则由ComparisonDetector实现
-            'R3': 'comparison',
-            'R4': 'comparison',
-            'R5': 'comparison',
-            'R6': 'comparison',
-            # R7-R10规则需要专门的检测器（可在StatisticalDetector或新增检测器中实现）
-            'R7': 'statistical',  # 次要NPU内核空窗占比
-            'R8': 'statistical',  # 核启动延迟分布
-            'R9': 'statistical',  # 内存拷贝速率
+            'R3': 'statistical',
+            'R4': 'statistical',
+            'R5': 'statistical',
+            'R6': 'statistical',
+            'R7': 'statistical',   # 次要NPU内核空窗占比
+            'R8': 'statistical',   # 核启动延迟分布
+            'R9': 'statistical',   # 内存拷贝速率
             'R10': 'statistical',  # 步间CPU操作耗时
         }
         self.enabled_rules = config.get('enabled_rules', [])
@@ -769,7 +738,7 @@ detection_layer:
       buffer_size: 10000
   
   # 检测引擎配置
-  detection_engine:
+    detection_engine:
     statistical:
       enabled: true
       window_size: 100
@@ -789,36 +758,61 @@ detection_layer:
           delta: 0.2
           h: 5
         applicable_metrics: ["T1", "T2", "T3", "T4", "T5", "T6", "T7"]
-    
-    comparison:
-      enabled: true
-      # R3规则配置
+      # R3-R6对比规则及历史对比配置（由StatisticalDetector内部子检测器使用）
       R3:
         enabled: true
         window_size: 100
         threshold_ratio: 0.2
-      # R4规则配置
       R4:
         enabled: true
         baselines:
           F1: 1000.0  # aclnnFlashAttentionScore基准FLOPS
           F2: 2000.0  # aclnnMatmul基准FLOPS
           # ...
-      # R5规则配置
       R5:
         enabled: true
         threshold_ratio: 0.3
-      # R6规则配置
       R6:
         enabled: true
         threshold_ratio: 0.2
+      history_comparison:
+        enabled: true
+        threshold_ratio: 0.15
+        max_history_steps: 100
     
     ml:
       enabled: true
-      methods: ["isolation_forest", "lof"]
+      methods: ["isolation_forest", "lof", "autoencoder", "lstm", "transformer"]
       isolation_forest:
         n_estimators: 100
         contamination: 0.1
+      lof:
+        n_neighbors: 20
+        contamination: 0.1
+      autoencoder:
+        hidden_dim: 32
+        encoding_dim: 16
+        learning_rate: 0.001
+        epochs: 50
+        threshold_percentile: 95
+      lstm:
+        hidden_dim: 64
+        num_layers: 2
+        dropout: 0.2
+        learning_rate: 0.001
+        epochs: 50
+        sequence_length: 20
+        threshold_percentile: 95
+      transformer:
+        d_model: 64
+        nhead: 4
+        num_layers: 2
+        dim_feedforward: 256
+        dropout: 0.1
+        learning_rate: 0.0001
+        epochs: 50
+        sequence_length: 30
+        threshold_percentile: 95
   
   # 规则编排器配置
   rule_orchestrator:

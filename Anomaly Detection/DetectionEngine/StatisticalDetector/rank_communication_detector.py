@@ -118,6 +118,7 @@ class RankCommunicationDetector(BaseDetector):
         return None
     
     def update_baseline(self, data: StructuredData):
-        """Update baseline (rank comparison doesn't need baseline update)"""
+        """Update baseline (rank comparison does not need baseline update)"""
         pass
+
 

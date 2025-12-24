@@ -2,7 +2,7 @@
 AutoEncoder detector
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict
 import sys
 import os
 import numpy as np
@@ -61,52 +61,66 @@ class AutoEncoderDetector(BaseDetector):
         self.epochs = self.ae_config.get('epochs', 50)
         self.threshold_percentile = self.ae_config.get('threshold_percentile', 95)
         
-        self.model = None
+        # 每个指标独立维护模型与历史
+        self.models: Dict[str, AutoEncoder] = {}
         self.feature_extractor = FeatureExtractor()
-        self.history: List[StructuredData] = []
+        self.history: Dict[str, List[StructuredData]] = {}
         self.max_history = config.get('max_history', 1000)
         self.min_samples = config.get('min_samples', 200)  # Minimum samples before detection
-        self.is_trained = False
-        self.reconstruction_errors = []
-        self.threshold = None
+        self.is_trained: Dict[str, bool] = {}
+        self.reconstruction_errors: Dict[str, List[float]] = {}
+        self.thresholds: Dict[str, float] = {}
     
     def get_name(self) -> str:
         return "AutoEncoderDetector"
+
+    def _get_metric_key(self, data: StructuredData) -> str:
+        """
+        Build a stable key for one metric time series.
+        """
+        return f"{data.metric_type}|{data.metric_name}|{data.node_id}|{data.rank_id}"
     
     def detect(self, data: StructuredData) -> Optional[AnomalyResult]:
         """Execute AutoEncoder detection"""
         if not self.enabled or not TORCH_AVAILABLE:
             return None
-        
-        # Add to history
-        self.history.append(data)
-        if len(self.history) > self.max_history:
-            self.history.pop(0)
-        
-        # Train model if we have enough samples
-        if not self.is_trained and len(self.history) >= self.min_samples:
-            self._train_model()
-        
-        if not self.is_trained or self.model is None:
+
+        metric_key = self._get_metric_key(data)
+        if metric_key not in self.history:
+            self.history[metric_key] = []
+            self.is_trained[metric_key] = False
+
+        metric_history = self.history[metric_key]
+        metric_history.append(data)
+        if len(metric_history) > self.max_history:
+            metric_history.pop(0)
+
+        # Train model for this metric if we have enough samples
+        if (not self.is_trained[metric_key] and
+                len(metric_history) >= self.min_samples):
+            self._train_model(metric_key)
+
+        if (not self.is_trained.get(metric_key) or
+                self.models.get(metric_key) is None or
+                metric_key not in self.thresholds):
             return None
-        
+
+        model = self.models[metric_key]
+        threshold = self.thresholds[metric_key]
         # Extract features
-        features = self.feature_extractor.extract(data, self.history)
+        features = self.feature_extractor.extract(data, metric_history)
         X = torch.FloatTensor([features])
         
         # Reconstruct
-        self.model.eval()
+        model.eval()
         with torch.no_grad():
-            reconstructed = self.model(X)
+            reconstructed = model(X)
             reconstruction_error = torch.mean((X - reconstructed) ** 2).item()
         
         # Calculate anomaly score
-        if self.threshold is None:
-            return None
+        normalized_score = min(1.0, reconstruction_error / (threshold * 2))
         
-        normalized_score = min(1.0, reconstruction_error / (self.threshold * 2))
-        
-        if reconstruction_error > self.threshold:
+        if reconstruction_error > threshold:
             return AnomalyResult(
                 anomaly_id=str(uuid.uuid4()),
                 metric_name=data.metric_name,
@@ -114,32 +128,35 @@ class AutoEncoderDetector(BaseDetector):
                 node_id=data.node_id,
                 rank_id=data.rank_id,
                 value=data.value,
-                threshold=self.threshold,
+                threshold=threshold,
                 rule_name='AutoEncoder',
                 detector_name=self.get_name(),
                 anomaly_score=normalized_score,
                 severity='critical' if normalized_score > 0.7 else 'warning',
                 message=f"AutoEncoder detected anomaly. Reconstruction error: {reconstruction_error:.3f}, "
-                       f"Threshold: {self.threshold:.3f}",
+                       f"Threshold: {threshold:.3f}",
                 timestamp_us=data.timestamp_us,
                 context={
                     'reconstruction_error': reconstruction_error,
-                    'threshold': self.threshold,
+                    'threshold': threshold,
                     'normalized_score': normalized_score
                 }
             )
         
         return None
     
-    def _train_model(self):
-        """Train AutoEncoder model"""
-        if not TORCH_AVAILABLE or len(self.history) < self.min_samples:
+    def _train_model(self, metric_key: str):
+        """Train AutoEncoder model for a specific metric"""
+        if (not TORCH_AVAILABLE or
+                metric_key not in self.history or
+                len(self.history[metric_key]) < self.min_samples):
             return
         
         # Extract features for all history
         X = []
-        for i, data in enumerate(self.history):
-            features = self.feature_extractor.extract(data, self.history[:i])
+        metric_history = self.history[metric_key]
+        for i, data in enumerate(metric_history):
+            features = self.feature_extractor.extract(data, metric_history[:i])
             X.append(features)
         
         X = np.array(X)
@@ -147,36 +164,47 @@ class AutoEncoderDetector(BaseDetector):
         
         # Initialize model
         input_dim = len(X[0])
-        self.model = AutoEncoder(input_dim, self.hidden_dim, self.encoding_dim)
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        model = AutoEncoder(input_dim, self.hidden_dim, self.encoding_dim)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
         criterion = nn.MSELoss()
         
         # Train
-        self.model.train()
+        model.train()
         for epoch in range(self.epochs):
             optimizer.zero_grad()
-            reconstructed = self.model(X_tensor)
+            reconstructed = model(X_tensor)
             loss = criterion(reconstructed, X_tensor)
             loss.backward()
             optimizer.step()
         
         # Calculate reconstruction errors and threshold
-        self.model.eval()
+        model.eval()
         with torch.no_grad():
-            reconstructed = self.model(X_tensor)
+            reconstructed = model(X_tensor)
             errors = torch.mean((X_tensor - reconstructed) ** 2, dim=1).numpy()
-        
-        self.reconstruction_errors = errors.tolist()
-        self.threshold = np.percentile(errors, self.threshold_percentile)
-        self.is_trained = True
+
+        self.reconstruction_errors[metric_key] = errors.tolist()
+        self.thresholds[metric_key] = float(np.percentile(errors, self.threshold_percentile))
+        self.models[metric_key] = model
+        self.is_trained[metric_key] = True
     
     def update_baseline(self, data: StructuredData):
         """Update baseline (add to history and retrain if needed)"""
-        self.history.append(data)
-        if len(self.history) > self.max_history:
-            self.history.pop(0)
-        
-        # Retrain periodically
-        if len(self.history) >= self.min_samples and len(self.history) % 200 == 0:
-            self._train_model()
+        if not self.enabled or not TORCH_AVAILABLE:
+            return
+
+        metric_key = self._get_metric_key(data)
+        if metric_key not in self.history:
+            self.history[metric_key] = []
+            self.is_trained[metric_key] = False
+
+        metric_history = self.history[metric_key]
+        metric_history.append(data)
+        if len(metric_history) > self.max_history:
+            metric_history.pop(0)
+
+        # Retrain periodically for this metric
+        if (len(metric_history) >= self.min_samples and
+                len(metric_history) % 200 == 0):
+            self._train_model(metric_key)
 

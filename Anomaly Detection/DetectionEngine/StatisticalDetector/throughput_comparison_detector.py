@@ -115,3 +115,4 @@ class ThroughputComparisonDetector(BaseDetector):
                     alpha * data.value + (1 - alpha) * self.baseline_throughput[metric_key]
                 )
 
+

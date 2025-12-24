@@ -21,19 +21,17 @@ class RuleOrchestrator:
             config: Configuration dictionary
         """
         # Rule to detector mapping
+        # All R1-R10 are implemented by the unified StatisticalDetector
         self.rule_to_detector_map = {
-            # R1, R2 rules implemented by StatisticalDetector
             'R1': 'statistical',
             'R2': 'statistical',
-            # R3-R6 rules implemented by ComparisonDetector
-            'R3': 'comparison',
-            'R4': 'comparison',
-            'R5': 'comparison',
-            'R6': 'comparison',
-            # R7-R10 rules (can be implemented by StatisticalDetector or other detectors)
-            'R7': 'statistical',  # Minor NPU kernel idle ratio
-            'R8': 'statistical',  # Kernel launch delay distribution
-            'R9': 'statistical',  # Memory copy rate
+            'R3': 'statistical',
+            'R4': 'statistical',
+            'R5': 'statistical',
+            'R6': 'statistical',
+            'R7': 'statistical',   # Minor NPU kernel idle ratio
+            'R8': 'statistical',   # Kernel launch delay distribution
+            'R9': 'statistical',   # Memory copy rate
             'R10': 'statistical',  # Inter-step CPU operation time
         }
         

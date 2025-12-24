@@ -13,6 +13,8 @@ from .isolation_forest_detector import IsolationForestDetector
 from .lof_detector import LOFDetector
 from .one_class_svm_detector import OneClassSVMDetector
 from .autoencoder_detector import AutoEncoderDetector
+from .lstm_detector import LSTMDetector
+from .transformer_detector import TransformerDetector
 
 
 class MLDetector(BaseDetector):
@@ -45,6 +47,16 @@ class MLDetector(BaseDetector):
             ae_config = ml_config.get('autoencoder', {})
             ae_config.update(config)
             self.detectors.append(AutoEncoderDetector(ae_config))
+        
+        if 'lstm' in methods:
+            lstm_config = ml_config.get('lstm', {})
+            lstm_config.update(config)
+            self.detectors.append(LSTMDetector(lstm_config))
+        
+        if 'transformer' in methods:
+            transformer_config = ml_config.get('transformer', {})
+            transformer_config.update(config)
+            self.detectors.append(TransformerDetector(transformer_config))
     
     def get_name(self) -> str:
         return "MLDetector"

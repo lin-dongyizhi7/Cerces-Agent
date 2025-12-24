@@ -10,7 +10,6 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from common.base_detector import BaseDetector
 from common.data_structures import StructuredData, AnomalyResult
 from StatisticalDetector.statistical_detector import StatisticalDetector
-from ComparisonDetector.comparison_detector import ComparisonDetector
 from MLDetector.ml_detector import MLDetector
 
 
@@ -30,18 +29,11 @@ class DetectionEngine:
     
     def _initialize_detectors(self, config: dict):
         """Initialize all detectors based on configuration"""
-        # Statistical detector
-        if config.get('statistical', {}).get('enabled', True):
-            statistical_config = config.get('statistical', {})
-            statistical_config.update(config)  # Merge parent config
+        # Unified statistical detector (includes comparison-based statistical methods)
+        if config.get('statistical', {}).get('enabled', True) or config.get('comparison', {}).get('enabled', True):
+            statistical_config = dict(config)
             self.detectors['statistical'] = StatisticalDetector(statistical_config)
-        
-        # Comparison detector
-        if config.get('comparison', {}).get('enabled', True):
-            comparison_config = config.get('comparison', {})
-            comparison_config.update(config)  # Merge parent config
-            self.detectors['comparison'] = ComparisonDetector(comparison_config)
-        
+
         # ML detector
         if config.get('ml', {}).get('enabled', True):
             ml_config = config.get('ml', {})
@@ -54,7 +46,7 @@ class DetectionEngine:
         Execute detection using specified detector
         
         Args:
-            detector_name: Name of detector ('statistical', 'comparison', 'ml')
+            detector_name: Name of detector ('statistical', 'ml')
             data: Structured data to detect
             
         Returns:

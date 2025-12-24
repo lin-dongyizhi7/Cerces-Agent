@@ -116,6 +116,7 @@ class DPGroupCommunicationDetector(BaseDetector):
         return None
     
     def update_baseline(self, data: StructuredData):
-        """Update baseline (DP group comparison doesn't need baseline update)"""
+        """Update baseline (DP group comparison does not need baseline update)"""
         pass
+
 

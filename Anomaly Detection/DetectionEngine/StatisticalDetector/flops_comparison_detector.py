@@ -107,3 +107,4 @@ class FLOPSComparisonDetector(BaseDetector):
             #     alpha * data.value + (1 - alpha) * self.metric_baselines[data.metric_type]
             # )
 
+
