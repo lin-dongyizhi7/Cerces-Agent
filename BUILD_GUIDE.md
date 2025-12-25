@@ -14,6 +14,9 @@ brew install protobuf
 # 安装 ZeroMQ
 brew install zeromq
 
+# 安装 cppzmq (ZeroMQ C++ 绑定，必需)
+brew install cppzmq
+
 # 安装 pkg-config（用于查找库）
 brew install pkg-config
 ```
@@ -28,6 +31,7 @@ sudo apt-get install -y \
     libprotobuf-dev \
     protobuf-compiler \
     libzmq3-dev \
+    libcppzmq-dev \
     pkg-config
 ```
 
@@ -40,6 +44,7 @@ sudo yum install -y \
     protobuf-devel \
     protobuf-compiler \
     zeromq-devel \
+    cppzmq-devel \
     pkgconfig
 ```
 
@@ -134,15 +139,21 @@ cd build
 cmake -DProtobuf_DIR=/path/to/protobuf/cmake ..
 ```
 
-### 2. CMake 找不到 ZeroMQ
+### 2. CMake 找不到 ZeroMQ 或 cppzmq
 
 ```bash
-# 手动指定 ZeroMQ 路径
+# 手动指定 ZeroMQ 和 cppzmq 路径
 cmake \
     -DZMQ_INCLUDE_DIR=/usr/local/include \
     -DZMQ_LIBRARY=/usr/local/lib/libzmq.dylib \
+    -DCPPZMQ_INCLUDE_DIR=/usr/local/include \
     ..
 ```
+
+如果找不到 cppzmq，请安装：
+- macOS: `brew install cppzmq`
+- Ubuntu/Debian: `sudo apt-get install libcppzmq-dev`
+- CentOS/RHEL: `sudo yum install cppzmq-devel` (如果可用) 或从源码编译
 
 ### 3. macOS 上找不到库文件
 

@@ -9,6 +9,27 @@ find_package(Protobuf REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZMQ REQUIRED libzmq)
 
+# 查找 cppzmq (ZeroMQ C++ binding, header-only)
+# 尝试查找 cppzmq 包
+find_path(CPPZMQ_INCLUDE_DIR
+    NAMES zmq.hpp
+    PATHS
+        /opt/homebrew/include
+        /usr/local/include
+        /usr/include
+        ${ZMQ_INCLUDE_DIRS}
+    PATH_SUFFIXES
+        cppzmq
+)
+
+if(CPPZMQ_INCLUDE_DIR)
+    message(STATUS "Found cppzmq: ${CPPZMQ_INCLUDE_DIR}")
+else()
+    message(WARNING "cppzmq not found. Please install: brew install cppzmq (macOS) or apt-get install libcppzmq-dev (Linux)")
+    # 尝试使用 ZMQ_INCLUDE_DIRS 作为备选
+    set(CPPZMQ_INCLUDE_DIR ${ZMQ_INCLUDE_DIRS})
+endif()
+
 # Protobuf生成
 set(PROTO_FILES
     proto/monitor.proto
@@ -53,8 +74,10 @@ add_executable(communicator
 target_include_directories(communicator PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Communicator/include
     ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/proto
     ${Protobuf_INCLUDE_DIRS}
     ${ZMQ_INCLUDE_DIRS}
+    ${CPPZMQ_INCLUDE_DIR}
 )
 
 target_link_libraries(communicator
@@ -74,6 +97,7 @@ add_executable(agent
 target_include_directories(agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Agent/include
     ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/proto
     ${Protobuf_INCLUDE_DIRS}
 )
 

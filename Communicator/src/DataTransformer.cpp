@@ -12,13 +12,19 @@ DataTransformer::~DataTransformer() {
 StructuredData DataTransformer::Transform(const monitor::MonitorData& proto_data) {
     StructuredData structured_data;
     
+    // 将 protobuf Map 转换为 std::map
+    std::map<std::string, std::string> tags_map;
+    for (const auto& pair : proto_data.tags()) {
+        tags_map[pair.first] = pair.second;
+    }
+    
     structured_data.node_id = proto_data.node_id();
-    structured_data.rank_id = ExtractRankId(proto_data.tags());
+    structured_data.rank_id = ExtractRankId(tags_map);
     structured_data.timestamp_us = proto_data.timestamp();
     structured_data.metric_name = proto_data.metric_name();
     structured_data.value = proto_data.value();
     structured_data.unit = proto_data.unit();
-    structured_data.step_id = ExtractStepId(proto_data.tags());
+    structured_data.step_id = ExtractStepId(tags_map);
     structured_data.metric_type = InferMetricType(proto_data.metric_name());
     
     // 复制tags到metadata

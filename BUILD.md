@@ -14,9 +14,9 @@
   - macOS: `brew install protobuf`
 
 - **ZeroMQ**：用于消息队列
-  - Ubuntu/Debian: `sudo apt-get install libzmq3-dev`
-  - CentOS/RHEL: `sudo yum install zeromq-devel`
-  - macOS: `brew install zeromq`
+  - Ubuntu/Debian: `sudo apt-get install libzmq3-dev libcppzmq-dev`
+  - CentOS/RHEL: `sudo yum install zeromq-devel cppzmq-devel`
+  - macOS: `brew install zeromq cppzmq`
 
 ## 编译步骤
 

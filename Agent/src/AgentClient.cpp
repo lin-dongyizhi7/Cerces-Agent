@@ -90,7 +90,6 @@ bool AgentClient::SerializeMetric(const MetricGenerator::MetricData& metric,
     // 创建Protobuf消息
     monitor::MonitorData proto_data;
     proto_data.set_node_id(node_id_);
-    proto_data.set_rank_id(rank_id_);
     proto_data.set_timestamp(metric_generator_.GetCurrentTimestamp());
     proto_data.set_metric_name(metric.metric_name);
     proto_data.set_value(metric.value);

@@ -46,6 +46,21 @@ else
     echo -e "${YELLOW}警告: 未找到 pkg-config，无法检查 ZeroMQ${NC}"
 fi
 
+# 检查 cppzmq (ZeroMQ C++ 绑定)
+CPPZMQ_FOUND=false
+for dir in /opt/homebrew/include /usr/local/include /usr/include; do
+    if [ -f "${dir}/zmq.hpp" ] || [ -f "${dir}/cppzmq/zmq.hpp" ]; then
+        echo -e "${GREEN}✓ cppzmq: 找到在 ${dir}${NC}"
+        CPPZMQ_FOUND=true
+        break
+    fi
+done
+
+if [ "$CPPZMQ_FOUND" = false ]; then
+    echo -e "${YELLOW}警告: 未找到 cppzmq (zmq.hpp)，构建可能失败${NC}"
+    echo "请安装: brew install cppzmq (macOS) 或 apt-get install libcppzmq-dev (Linux)"
+fi
+
 # 检查编译器
 if command -v g++ &> /dev/null; then
     echo -e "${GREEN}✓ 编译器: $(g++ --version | head -n1)${NC}"
