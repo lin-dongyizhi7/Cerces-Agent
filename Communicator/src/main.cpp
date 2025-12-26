@@ -10,12 +10,75 @@
 #include <chrono>
 #include <signal.h>
 #include <atomic>
+#include <fstream>
+#include <filesystem>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#ifdef __linux__
+#include <unistd.h>
+#endif
 
 std::atomic<bool> g_running(true);
 
 void SignalHandler(int signal) {
     std::cout << "\nReceived signal " << signal << ", shutting down..." << std::endl;
     g_running = false;
+}
+
+// Helper function to find config file in multiple possible locations
+std::string FindConfigFile(const std::string& default_path) {
+    // If path is absolute or explicitly provided, try it first
+    if (std::filesystem::path(default_path).is_absolute() || 
+        std::filesystem::exists(default_path)) {
+        if (std::filesystem::exists(default_path)) {
+            return default_path;
+        }
+    }
+    
+    // Try relative to executable location (for build directory)
+    // Get executable path
+    std::string exe_path;
+    #ifdef __APPLE__
+        char path[1024];
+        uint32_t size = sizeof(path);
+        if (_NSGetExecutablePath(path, &size) == 0) {
+            exe_path = std::filesystem::canonical(path).parent_path().string();
+        }
+    #elif __linux__
+        char path[1024];
+        ssize_t count = readlink("/proc/self/exe", path, sizeof(path) - 1);
+        if (count != -1) {
+            path[count] = '\0';
+            exe_path = std::filesystem::canonical(path).parent_path().string();
+        }
+    #endif
+    
+    if (!exe_path.empty()) {
+        // Try ../config/communicator.conf (from build directory)
+        std::filesystem::path config_path = std::filesystem::path(exe_path) / ".." / "config" / "communicator.conf";
+        if (std::filesystem::exists(config_path)) {
+            return std::filesystem::canonical(config_path).string();
+        }
+        // Try ../../config/communicator.conf (if executable is in build/subdirectory)
+        config_path = std::filesystem::path(exe_path) / ".." / ".." / "config" / "communicator.conf";
+        if (std::filesystem::exists(config_path)) {
+            return std::filesystem::canonical(config_path).string();
+        }
+    }
+    
+    // Try relative to current working directory
+    if (std::filesystem::exists("config/communicator.conf")) {
+        return std::filesystem::canonical("config/communicator.conf").string();
+    }
+    
+    // Try in parent directory
+    if (std::filesystem::exists("../config/communicator.conf")) {
+        return std::filesystem::canonical("../config/communicator.conf").string();
+    }
+    
+    // Return original path if nothing found (will fail gracefully)
+    return default_path;
 }
 
 int main(int argc, char* argv[]) {
@@ -25,6 +88,8 @@ int main(int argc, char* argv[]) {
     
     // 加载配置
     std::string config_path = (argc > 1) ? argv[1] : "config/communicator.conf";
+    // Try to find config file in multiple locations
+    config_path = FindConfigFile(config_path);
     ConfigManager& config = ConfigManager::GetInstance();
     if (!config.LoadFromFile(config_path)) {
         std::cerr << "Warning: Failed to load config file, using defaults" << std::endl;

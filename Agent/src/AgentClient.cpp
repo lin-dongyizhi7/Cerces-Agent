@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
@@ -28,32 +29,44 @@ bool AgentClient::Connect() {
         return true;
     }
     
-    // 创建socket
-    socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_fd_ < 0) {
-        std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
+    // 使用 getaddrinfo 解析主机名或IP地址
+    struct addrinfo hints, *result, *rp;
+    memset(&hints, 0, sizeof(struct addrinfo));
+    hints.ai_family = AF_INET;      // 使用 IPv4
+    hints.ai_socktype = SOCK_STREAM; // TCP socket
+    
+    std::string port_str = std::to_string(server_port_);
+    int ret = getaddrinfo(server_host_.c_str(), port_str.c_str(), &hints, &result);
+    if (ret != 0) {
+        std::cerr << "Failed to resolve address " << server_host_ << ": " 
+                  << gai_strerror(ret) << std::endl;
         return false;
     }
     
-    // 设置服务器地址
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(server_port_);
-    
-    if (inet_pton(AF_INET, server_host_.c_str(), &server_addr.sin_addr) <= 0) {
-        std::cerr << "Invalid address: " << server_host_ << std::endl;
+    // 尝试连接每个返回的地址
+    bool connected = false;
+    for (rp = result; rp != nullptr; rp = rp->ai_next) {
+        // 创建socket
+        socket_fd_ = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (socket_fd_ < 0) {
+            continue;
+        }
+        
+        // 尝试连接
+        if (connect(socket_fd_, rp->ai_addr, rp->ai_addrlen) == 0) {
+            connected = true;
+            break;
+        }
+        
         close(socket_fd_);
         socket_fd_ = -1;
-        return false;
     }
     
-    // 连接服务器
-    if (connect(socket_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+    freeaddrinfo(result);
+    
+    if (!connected) {
         std::cerr << "Failed to connect to " << server_host_ << ":" << server_port_
                   << ": " << strerror(errno) << std::endl;
-        close(socket_fd_);
-        socket_fd_ = -1;
         return false;
     }
     
