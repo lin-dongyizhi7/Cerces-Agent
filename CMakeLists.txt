@@ -5,9 +5,67 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 查找依赖库
-find_package(Protobuf REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZMQ REQUIRED libzmq)
+
+# 使用 pkg-config 获取完整的 Protobuf 链接库（包含 Abseil）
+pkg_check_modules(PROTOBUF_PKG REQUIRED protobuf)
+
+# 优先使用 homebrew 的 protoc，确保版本与运行时库一致
+# 首先尝试从 pkg-config 获取 protoc 路径
+execute_process(
+    COMMAND pkg-config --variable=prefix protobuf
+    OUTPUT_VARIABLE PROTOBUF_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+
+# 查找 protoc，优先使用 homebrew 路径
+find_program(Protobuf_PROTOC_EXECUTABLE
+    NAMES protoc
+    PATHS
+        ${PROTOBUF_PREFIX}/bin
+        /opt/homebrew/bin
+        /usr/local/bin
+        /usr/bin
+    NO_DEFAULT_PATH
+)
+
+# 如果还没找到，尝试在 PATH 中查找（但排除 conda）
+if(NOT Protobuf_PROTOC_EXECUTABLE)
+    find_program(Protobuf_PROTOC_EXECUTABLE
+        NAMES protoc
+        PATHS
+            /opt/homebrew/bin
+            /usr/local/bin
+            /usr/bin
+    )
+endif()
+
+# 如果还是没找到，使用 find_package
+if(NOT Protobuf_PROTOC_EXECUTABLE)
+    find_package(Protobuf REQUIRED)
+endif()
+
+# 确保使用正确的 protoc
+if(NOT Protobuf_PROTOC_EXECUTABLE)
+    message(FATAL_ERROR "protoc not found. Please ensure protobuf is installed via homebrew.")
+endif()
+
+# 验证 protoc 版本
+message(STATUS "Using protoc: ${Protobuf_PROTOC_EXECUTABLE}")
+execute_process(
+    COMMAND ${Protobuf_PROTOC_EXECUTABLE} --version
+    OUTPUT_VARIABLE PROTOBUF_VERSION_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+message(STATUS "protoc version: ${PROTOBUF_VERSION_OUTPUT}")
+
+# 检查版本是否匹配
+if(PROTOBUF_VERSION_OUTPUT MATCHES "29\\.|5\\.29")
+    message(WARNING "Detected old protoc version. This may cause compatibility issues.")
+    message(WARNING "Please use homebrew protoc (version 33.x) instead of conda protoc.")
+endif()
 
 # 查找 cppzmq (ZeroMQ C++ binding, header-only)
 # 尝试查找 cppzmq 包
@@ -75,16 +133,26 @@ target_include_directories(communicator PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Communicator/include
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/proto
-    ${Protobuf_INCLUDE_DIRS}
+    ${PROTOBUF_PKG_INCLUDE_DIRS}
     ${ZMQ_INCLUDE_DIRS}
     ${CPPZMQ_INCLUDE_DIR}
 )
 
 target_link_libraries(communicator
-    ${Protobuf_LIBRARIES}
+    ${PROTOBUF_PKG_LIBRARIES}
     ${ZMQ_LIBRARIES}
     pthread
 )
+
+# 添加库路径（macOS Homebrew）
+if(APPLE)
+    target_link_directories(communicator PRIVATE
+        ${PROTOBUF_PKG_LIBRARY_DIRS}
+        ${ZMQ_LIBDIR}
+        /opt/homebrew/lib
+        /usr/local/lib
+    )
+endif()
 
 # Agent可执行文件
 add_executable(agent
@@ -98,13 +166,22 @@ target_include_directories(agent PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Agent/include
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/proto
-    ${Protobuf_INCLUDE_DIRS}
+    ${PROTOBUF_PKG_INCLUDE_DIRS}
 )
 
 target_link_libraries(agent
-    ${Protobuf_LIBRARIES}
+    ${PROTOBUF_PKG_LIBRARIES}
     pthread
 )
+
+# 添加 Protobuf 库路径（macOS Homebrew）
+if(APPLE)
+    target_link_directories(agent PRIVATE
+        ${PROTOBUF_PKG_LIBRARY_DIRS}
+        /opt/homebrew/lib
+        /usr/local/lib
+    )
+endif()
 
 # 安装规则
 install(TARGETS communicator agent

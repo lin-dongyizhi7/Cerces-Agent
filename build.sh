@@ -15,6 +15,22 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 
 echo -e "${GREEN}=== Cerces-Agent 构建脚本 ===${NC}"
 
+# macOS 特定设置 - 优先使用 Homebrew 工具
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # 优先使用 Homebrew 的工具（避免使用 conda 的旧版本）
+    if [ -d "/opt/homebrew" ]; then
+        export PATH="/opt/homebrew/bin:$PATH"
+        export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$PKG_CONFIG_PATH"
+        export CMAKE_PREFIX_PATH="/opt/homebrew:$CMAKE_PREFIX_PATH"
+        echo -e "${GREEN}✓ 使用 Homebrew 路径 (/opt/homebrew)${NC}"
+    elif [ -d "/usr/local" ]; then
+        export PATH="/usr/local/bin:$PATH"
+        export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+        export CMAKE_PREFIX_PATH="/usr/local:$CMAKE_PREFIX_PATH"
+        echo -e "${GREEN}✓ 使用 Homebrew 路径 (/usr/local)${NC}"
+    fi
+fi
+
 # 检查依赖
 echo -e "${YELLOW}检查依赖...${NC}"
 
@@ -32,7 +48,24 @@ if ! command -v protoc &> /dev/null; then
     echo "请安装: brew install protobuf (macOS) 或 apt-get install protobuf-compiler (Linux)"
     exit 1
 fi
-echo -e "${GREEN}✓ Protobuf: $(protoc --version)${NC}"
+
+# 显示使用的 protoc 路径和版本
+PROTOC_PATH=$(which protoc)
+PROTOC_VERSION=$(protoc --version)
+echo -e "${GREEN}✓ Protobuf: ${PROTOC_VERSION} (${PROTOC_PATH})${NC}"
+
+# 检查是否使用了 conda 的旧版本 protoc（macOS）
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    if [[ "$PROTOC_PATH" == *"anaconda"* ]] || [[ "$PROTOC_PATH" == *"conda"* ]]; then
+        echo -e "${YELLOW}警告: 检测到 conda 环境的 protoc，可能导致版本不兼容${NC}"
+        echo -e "${YELLOW}建议: 使用 homebrew 的 protoc (brew install protobuf)${NC}"
+        if [[ "$PROTOC_VERSION" == *"29"* ]] || [[ "$PROTOC_VERSION" == *"5.29"* ]]; then
+            echo -e "${RED}错误: protoc 版本过旧 (29.x)，与运行时库 (33.x) 不兼容${NC}"
+            echo -e "${RED}请运行: export PATH=\"/opt/homebrew/bin:\$PATH\" 然后重新运行此脚本${NC}"
+            exit 1
+        fi
+    fi
+fi
 
 # 检查 ZeroMQ
 if command -v pkg-config &> /dev/null; then
@@ -129,18 +162,6 @@ CMAKE_ARGS=(
 
 if [ -n "$INSTALL_PREFIX" ]; then
     CMAKE_ARGS+=(-DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX")
-fi
-
-# macOS 特定设置
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # 尝试使用 Homebrew 路径
-    if [ -d "/opt/homebrew" ]; then
-        export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$PKG_CONFIG_PATH"
-        export CMAKE_PREFIX_PATH="/opt/homebrew:$CMAKE_PREFIX_PATH"
-    elif [ -d "/usr/local" ]; then
-        export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
-        export CMAKE_PREFIX_PATH="/usr/local:$CMAKE_PREFIX_PATH"
-    fi
 fi
 
 cmake "${CMAKE_ARGS[@]}" "$PROJECT_ROOT"
